@@ -1,155 +1,122 @@
 #include <baseimpl.h>
 #include <apt_thread_mutex.h>
-#include <apr_thread_proc.h>
 #include <apr_network_io.h>
 #include <assert>
 #include <cstring>
-
-struct APRBasePimpl
+TGLBaseImpl::TGLBaseImpl()
 {
-    apr_pool_t *pool;
-    apt_thread_t *worker;
-    apr_socket_t *socket;
+    apr_status_t res;
+    res = apr_pool_create(&pool, NULL);
+    assert(res == APR_SUCCESS);
     
-    apr_mutex_t *send_lock;
-    apr_mutex_t *recv_lock;
-    apr_mutex_t *spare_lock;
-    apr_mutex_t *size_lock;
+    res = apr_mutex_create(&send_lock, APR_TREAD_MUTEX_NESTED, pool);
+    assert(res == APR_SUCCESS);
+
+    res = apr_mutex_create(&recv_lock, APR_TREAD_MUTEX_NESTED, pool);
+    assert(res == APR_SUCCESS);
+
+    res = apr_mutex_create(&spare_lock, APR_TREAD_MUTEX_NESTED, pool);
+    assert(res == APR_SUCCESS);
     
-    map<char*,size_t> size_map;
+    res = apr_mutex_create(&size_lock, APR_TREAD_MUTEX_NESTED, pool);
+    assert(res == APR_SUCCESS);
+
+    stopping = false;
+    opened = false;
+
+    host = NULL;
+    port = 0;
+
+    socket = NULL;
+
     
-    queue<char*, list> send_queue;
-    queue<char*, list> recv_queue;
+    worker = NULL;
+    longest_str = 80;
 
-    queue<char*,list> spare_queue;
+    capacity = 80;
+    filled = 0;
+    buf = new char[capacity];
 
-    bool stopping;
-    bool opened;
-    size_t longest_str;
+    //create a couple of spare strings
+    appendToSpare();
+    appendToSpare();
+}
 
-    void appendToSpare()
-    {
-        char *appnd = new char[longest_str + 1];
-        assert(appnd);
 
-        assert(size_lock && spare_lock);
+TGLBaseImpl::~TGLBaseImpl()
+{
+    stopping = false;
+    if(worker)
+        apr_thread_exit(worker, 0);
 
+    apr_pool_clear(pool);
+
+    //draining queues
+    while (!send_queue.empty())
+        send_queue.pop();
+
+    while (!recv_queue.empty())
+        recv_queue.pop();
+
+    for(map<char*,size_t>::iterator = size_map.begin(); it != size_map.end(); it++) {
+        char *ptr = it->first;
+        delete ptr;
+    }
+}
+
+void TGLBaseImpl::appendToSpare()
+{
+    char *appnd = new char[longest_str + 1];
+    assert(appnd);
+
+    assert(size_lock && spare_lock);
+
+    apr_mutex_lock(size_lock);
+    size_map[appnd] = longest_str + 1;
+    apr_mutex_unlock(size_lock);
+
+    apr_mutex_lock(spare_lock);
+    spare_queue.push(appnd);
+    apr_mutex_unlock(spare_lock);
+}
+
+bool TGLBaseImpl::getStringSize(const char *ptr, size_t *res)
+{
+    bool ret = false;
+    assert(ptr && res);
+    
+    apr_mutex_lock(size_lock);
+    map<char*,size_t>::iterator it = size_map.find(ptr);
+    if(it != size_map.end()) {
+        ret = true;
+        *res = it->second();
+    }
+    apr_mutex_unlock(size_lock);
+
+    return ret;
+}
+
+bool TGLBaseImpl::resizeString(char **ptr, size_t str_len)
+{
+    size_t curr_sz = 0;
+    bool ret = true;
+    if(!getStringSize(*ptr, &curr_sz))
+        ret = false;
+    else if (str_len > curr_sz - 1) {
         apr_mutex_lock(size_lock);
-        size_map[appnd] = longest_str + 1;
+        size_map.erase(*ptr);
+        
+        delete *ptr;
+        
+        *ptr = new char[str_len + 1];
+        assert(*ptr);
+
+        size_map[*ptr] = str_len + 1;
+
         apr_mutex_unlock(size_lock);
-
-        apr_mutex_lock(spare_lock);
-        spare_queue.push(appnd);
-        apr_mutex_unlock(spare_lock);
     }
-
-    bool getStringSize(const char *ptr, size_t *res)
-    {
-        bool ret = false;
-        assert(ptr && res);
-        
-        apr_mutex_lock(size_lock);
-        map<char*,size_t>::iterator it = size_map.find(ptr);
-        if(it != size_map.end()) {
-            ret = true;
-            *res = it->second();
-        }
-        apr_mutex_unlock(size_lock);
-
-        return ret;
-    }
-
-    bool resizeString(char **ptr, size_t str_len)
-    {
-        size_t curr_sz = 0;
-        bool ret = true;
-        if(!getStringSize(*ptr, &curr_sz))
-            ret = false;
-        else if (str_len > curr_sz - 1) {
-            apr_mutex_lock(size_lock);
-            size_map.erase(*ptr);
-            
-            delete *ptr;
-            
-            *ptr = new char[str_len + 1];
-            assert(*ptr);
-
-            size_map[*ptr] = str_len + 1;
-
-            apr_mutex_unlock(size_lock);
-        }
-        return ret;
-    }
-
-    APRBasePimpl()
-    {
-        apr_status_t res;
-        res = apr_pool_create(&pool, NULL);
-        assert(res == APR_SUCCESS);
-        
-        res = apr_mutex_create(&send_lock, APR_TREAD_MUTEX_NESTED, pool);
-        assert(res == APR_SUCCESS);
-
-        res = apr_mutex_create(&recv_lock, APR_TREAD_MUTEX_NESTED, pool);
-        assert(res == APR_SUCCESS);
-
-        res = apr_mutex_create(&spare_lock, APR_TREAD_MUTEX_NESTED, pool);
-        assert(res == APR_SUCCESS);
-        
-        res = apr_mutex_create(&size_lock, APR_TREAD_MUTEX_NESTED, pool);
-        assert(res == APR_SUCCESS);
-
-        stopping = false;
-        opened = false;
-
-        host = NULL;
-        port = 0;
-
-        socket = NULL;
-
-        
-        worker = NULL;
-        longest_str = 80;
-
-        capacity = 80;
-        filled = 0;
-        buf = new char[capacity];
-
-        //create a couple of spare strings
-        appendToSpare();
-        appendToSpare();
-    }
-
-    ~APRBasePimpl()
-    {
-        stopping = false;
-        if(worker)
-            apr_thread_exit(worker, 0);
-
-        apr_pool_clear(pool);
-
-        //draining queues
-        while (!send_queue.empty())
-            send_queue.pop();
-
-        while (!recv_queue.empty())
-            recv_queue.pop();
-
-        for(map<char*,size_t>::iterator = size_map.begin(); it != size_map.end(); it++) {
-            char *ptr = it->first;
-            delete ptr;
-        }
-    }
-
-    bool blocking;
-    
-    char *host;
-    int port;
-
-    char *buf;
-    size_t capacity;
-    size_t filled;
-};
+    return ret;
+}
 
 void *thread_func(apr_thread_t *thread, void *param)
 {
