@@ -3,6 +3,8 @@
 class TGLSImpl;
 class TGLCImpl;
 
+void TGLib_start();
+void TGLib_end();
 /**
  * Port interface.
  */
@@ -25,6 +27,8 @@ public:
      * Send NULL-terminated string to remote hos
      */
     virtual bool sendString(const char *str)=0;
+
+    virtual const char *getLastError()=0;
 };
 
 /** 
@@ -53,6 +57,8 @@ public:
 
     virtual const char *getLastString();
     virtual bool sendString(const char *str);
+
+    virtual const char *getLastError();
 private:
     TGLSImpl *pimpl;
 };
@@ -62,6 +68,7 @@ class TGLibClientPort : public ITGLPort
 public:
     TGLibClientPort(const char *host = NULL);
     TGLibClientPort();
+    ~TGLibClientPort();
 
     const char *getHost();
     vois setHost(const char *host);
@@ -79,6 +86,8 @@ public:
 
     virtual const char *getLastString();
     virtual bool sendString(const char *str);
+
+    virtual const char *getLastError();
 private:
     TGLCImpl *pimpl;
 };
