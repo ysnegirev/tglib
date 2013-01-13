@@ -1,34 +1,37 @@
-#include <apt_thread_mutex.h>
+#include <apr_poll.h>
+#include <cassert>
+#include <cstring>
+#include <apr_thread_proc.h>
+#include <apr_thread_mutex.h>
 #include <apr_network_io.h>
 #include <apr_poll.h>
-#include <assert>
-#include <cstring>
+
 #include <baseimpl.h>
 
+#define CHECK_FAIL(ret)\
+    if(ret != APR_SUCCESS)\
+        goto end;
 
 #define TGL_APR_ASSERT(rv)\
     if(rv != APR_SUCCESS) {\
-        putErr(rv);\
+        pimpl->putErr(rv);\
         ret = false;\
-        goto end;
+        goto end;\
     }
-static apr_status_t setup_pollset(apr_pollset_t **pollset, apr_socket *socket, apr_int16 rev_events, apr_pool *pool);
-static apr_status_t setup_pollset(apr_pollset_t **pollset, apr_socket *socket, apr_int16 rev_events, apr_pool *pool)
+static apr_status_t setup_pollset(apr_pollset_t **pollset, apr_socket_t *socket, apr_int16_t rev_events, apr_pool_t *pool);
+static apr_status_t setup_pollset(apr_pollset_t **pollset, apr_socket_t *socket, apr_int16_t rev_events, apr_pool_t *pool)
 {
-#define CHECK_FAIL\
-    if(ret != APR_SUCCESS)\
-        goto end;
 
     apr_status_t ret = APR_SUCCESS;
 
     ret = apr_pollset_create(pollset, 1, pool, 0);
-    CHECK_FAIL;
+    CHECK_FAIL(ret);
 
     apr_pollfd_t poll_fd;
     
     poll_fd.p = pool;
     poll_fd.desc_type = APR_POLL_SOCKET;
-    poll_fd.reqevents = revents;
+    poll_fd.reqevents = rev_events;
     poll_fd.rtnevents = 0;
     poll_fd.desc.s = socket;
     poll_fd.client_data = NULL;
@@ -49,10 +52,10 @@ void *recv_thread_func(apr_thread_t *thread, void *param)
 
     rv = apr_pool_create(&polls_pool, pimpl->pool);
     if (rv != APR_SUCCESS) 
-        polls_pool = pimp->pool; //??!!
+        polls_pool = pimpl->pool; //??!!
     
-    rv = setup_pollset(&pollset, pimp->socket, evt, polls_pool);
-    TGL_APR_ASSERT(rv);
+    rv = setup_pollset(&pollset, pimpl->socket, evt, polls_pool);
+    assert (rv == APR_SUCCESS);
 
     apr_int32_t num = 0;
     apr_interval_time_t timeout = 10e6;
@@ -63,7 +66,7 @@ void *recv_thread_func(apr_thread_t *thread, void *param)
         num = 0;
 
         rv = apr_pollset_poll(pollset, timeout, &num, &descs);
-        TGL_APR_ASSERT(rv);
+        CHECK_FAIL(rv);
 
         if (num) {
             //receive data
@@ -74,12 +77,12 @@ void *recv_thread_func(apr_thread_t *thread, void *param)
                 memcpy(tmp, pimpl->buf, pimpl->filled);
                 delete pimpl->buf;
                 pimpl->buf = tmp;
-                capacity *= 2;
-                real_cap = pimpl->capacity - filled;
+                pimpl->capacity *= 2;
+                real_cap = pimpl->capacity - pimpl->filled;
             }
             char *buf_start = pimpl->buf + pimpl->filled;
-            size_t want = real_cap, real_recv = real_cap;
-            rv = apr_socket_recv(pimpl->socket, buf_start, real_recv);
+            apr_size_t want = real_cap, real_recv = real_cap;
+            rv = apr_socket_recv(pimpl->socket, buf_start, &real_recv);
 
             if(rv != APR_SUCCESS) {
                 pimpl->putErr(rv);
@@ -92,37 +95,37 @@ void *recv_thread_func(apr_thread_t *thread, void *param)
                     //we have got a complete string. aquire a lock and
                     //copy it to the recv_queue
                     size_t our_size = pimpl->filled + i;
-                    apr_mutex_lock(pimpl->spare_lock);
+                    apr_thread_mutex_lock(pimpl->spare_lock);
                     char *our_str = NULL;
                     if(!pimpl->spare_queue.empty()) {
                         our_str = pimpl->spare_queue.back();
                         pimpl->spare_queue.pop();
                         size_t curr_sz = 0;
-                        assert(pimpl->getStringSize(our_str, curr_sz));
-                        if(curr < our_size) {
-                            pimpl->resizeString(our_str, curr_sz - 1);
+                        assert(pimpl->getStringSize(our_str, &curr_sz));
+                        if(curr_sz < our_size) {
+                            pimpl->resizeString(&our_str, curr_sz - 1);
                         }
                     }
                     else {
                         if (pimpl->longest_str + 1 < our_size)
                             pimpl->longest_str = our_size - 1;
                         our_str = new char[our_size];
-                        apr_mutex_lock(pimpl->size_lock);
+                        apr_thread_mutex_lock(pimpl->size_lock);
                         pimpl->size_map[our_str] = our_size;
-                        apr_mutex_unlock(pimpl->size_lock);
+                        apr_thread_mutex_unlock(pimpl->size_lock);
                     }
-                    apr_mutex_unlock(pimpl->spare_lock);
+                    apr_thread_mutex_unlock(pimpl->spare_lock);
 
-                    if(term_idx == capacity + 1)
+                    if(term_idx == pimpl->capacity + 1)
                         memcpy(our_str, pimpl->buf, our_size);
                     else {
                         our_size = i - term_idx - 1;
                         memcpy(our_str, buf_start + term_idx + 1, our_size);
                     }
                     
-                    apr_mutex_lock(pimpl->recv_lock);
-                    recv_queue.push(pimpl->our_str);
-                    apr_mutex_unlock(pimpl->recv_lock);
+                    apr_thread_mutex_lock(pimpl->recv_lock);
+                    pimpl->recv_queue.push(our_str);
+                    apr_thread_mutex_unlock(pimpl->recv_lock);
                     term_idx = i;
                 }
             }
@@ -131,8 +134,8 @@ void *recv_thread_func(apr_thread_t *thread, void *param)
             }
         }
     }
-
-    if (polls_pool != pimpl->pool)
+end:
+    if ( (polls_pool != pimpl->pool) && polls_pool)
         apr_pool_destroy(polls_pool);
 
     return NULL;
@@ -148,10 +151,10 @@ void *send_thread_func(apr_thread_t *thread, void *param)
 
     rv = apr_pool_create(&polls_pool, pimpl->pool);
     if (rv != APR_SUCCESS) 
-        polls_pool = pimp->pool; //??!!
+        polls_pool = pimpl->pool; //??!!
     
-    rv = setup_pollset(&pollset, pimp->socket, evt, polls_pool);
-    TGL_APR_ASSERT(rv);
+    rv = setup_pollset(&pollset, pimpl->socket, evt, polls_pool);
+    assert(rv == APR_SUCCESS);
 
     apr_int32_t num = 0;
     apr_interval_time_t timeout = 10e6;
@@ -161,11 +164,11 @@ void *send_thread_func(apr_thread_t *thread, void *param)
         num = 0;
 
         rv = apr_pollset_poll(pollset, timeout, &num, &descs);
-        TGL_APR_ASSERT(rv);
+        CHECK_FAIL(rv);
 
         if (num) {
             //send data
-            apr_mutex_lock(pimpl->send_lock);
+            apr_thread_mutex_lock(pimpl->send_lock);
             if(!pimpl->send_queue.empty()) {
                 char *snd = pimpl->send_queue.back();
                 pimpl->send_queue.pop();
@@ -187,11 +190,12 @@ void *send_thread_func(apr_thread_t *thread, void *param)
                 pimpl->refundStr(orig);
             }
             
-            apr_mutex_unlock(send_lock);
+            apr_thread_mutex_unlock(pimpl->send_lock);
         }
 
     }
 
+end:
     if (polls_pool != pimpl->pool)
         apr_pool_destroy(polls_pool);
 
@@ -204,19 +208,19 @@ TGLBaseImpl::TGLBaseImpl()
     res = apr_pool_create(&pool, NULL);
     assert(res == APR_SUCCESS);
 
-    res = apr_mutex_create(&send_lock, APR_TREAD_MUTEX_NESTED, pool);
+    res = apr_thread_mutex_create(&send_lock, APR_THREAD_MUTEX_NESTED, pool);
     assert(res == APR_SUCCESS);
 
-    res = apr_mutex_create(&recv_lock, APR_TREAD_MUTEX_NESTED, pool);
+    res = apr_thread_mutex_create(&recv_lock, APR_THREAD_MUTEX_NESTED, pool);
     assert(res == APR_SUCCESS);
 
-    res = apr_mutex_create(&spare_lock, APR_TREAD_MUTEX_NESTED, pool);
+    res = apr_thread_mutex_create(&spare_lock, APR_THREAD_MUTEX_NESTED, pool);
     assert(res == APR_SUCCESS);
     
-    res = apr_mutex_create(&size_lock, APR_TREAD_MUTEX_NESTED, pool);
+    res = apr_thread_mutex_create(&size_lock, APR_THREAD_MUTEX_NESTED, pool);
     assert(res == APR_SUCCESS);
 
-    res = apr_mutex_create(&err_lock, APR_TREAD_MUTEX_NESTED, pool);
+    res = apr_thread_mutex_create(&err_lock, APR_THREAD_MUTEX_NESTED, pool);
     assert(res == APR_SUCCESS);
 
 
@@ -248,8 +252,12 @@ TGLBaseImpl::TGLBaseImpl()
 TGLBaseImpl::~TGLBaseImpl()
 {
     stopping = false;
-    if(worker)
-        apr_thread_exit(worker, 0);
+
+    if(receiver)
+        apr_thread_exit(receiver, 0);
+    
+    if(sender)
+        apr_thread_exit(sender, 0);
 
     apr_pool_destroy(pool);
 
@@ -260,7 +268,7 @@ TGLBaseImpl::~TGLBaseImpl()
     while (!recv_queue.empty())
         recv_queue.pop();
 
-    for(map<char*,size_t>::iterator = size_map.begin(); it != size_map.end(); it++) {
+    for(map<char*,size_t>::iterator it = size_map.begin(); it != size_map.end(); it++) {
         char *ptr = it->first;
         delete [] ptr;
     }
@@ -277,27 +285,27 @@ bool TGLBaseImpl::sendStr(const char *str)
     char *myStr = NULL;
     size_t mySz = 0;
 
-    apr_mutex_lock(spare_lock);
+    apr_thread_mutex_lock(spare_lock);
     if(!spare_queue.empty()) {
         myStr = spare_queue.back();
         spare_queue.pop();
-        assert(getStringSize(myStr, mySz));
+        assert(getStringSize(myStr, &mySz));
     }
     else {
         mySz = strlen(str) + 1;
         myStr = new char[mySz];
         assert(myStr);
 
-        apr_mutex_lock(size_lock);
+        apr_thread_mutex_lock(size_lock);
         size_map[myStr] = mySz;
-        apr_mutex_unlock(size_lock);
+        apr_thread_mutex_unlock(size_lock);
     }
 
     strncpy(myStr, str, mySz);
 
-    apr_mutex_lock(send_lock);
+    apr_thread_mutex_lock(send_lock);
     send_queue.push(myStr);
-    apr_mutex_unlock(send_lock);
+    apr_thread_mutex_unlock(send_lock);
 
     return ret;
 }
@@ -305,20 +313,20 @@ bool TGLBaseImpl::sendStr(const char *str)
 const char* TGLBaseImpl::recvStr()
 {
     char *ret = NULL;
-    apr_mutex_lock(recv_lock);
+    apr_thread_mutex_lock(recv_lock);
     if(!recv_queue.empty()) {
         ret = recv_queue.back();
         recv_queue.pop();
     }
-    apr_mutex_unlock(recv_lock);
+    apr_thread_mutex_unlock(recv_lock);
     return ret;
 }
 
-void TGLBaseImpl::refundStr(const char *str)
+void TGLBaseImpl::refundStr(char *str)
 {
-    apr_mutex_lock(spare_lock);
+    apr_thread_mutex_lock(spare_lock);
     spare_queue.push(str);
-    apr_mutex_unlock(spare_lock);
+    apr_thread_mutex_unlock(spare_lock);
 }
 
 void TGLBaseImpl::setHost(const char *host)
@@ -331,12 +339,12 @@ void TGLBaseImpl::setHost(const char *host)
 const char* TGLBaseImpl::getLastError()
 {
     char *ret = NULL;
-    apr_mutex_lock(err_lock);
+    apr_thread_mutex_lock(err_lock);
     if(!errStack.empty()) {
         ret = errStack.top();
         errStack.pop();
     }
-    apr_mutex_unlock(err_lock);
+    apr_thread_mutex_unlock(err_lock);
     return ret;
 }
 
@@ -347,26 +355,26 @@ void TGLBaseImpl::appendToSpare()
 
     assert(size_lock && spare_lock);
 
-    apr_mutex_lock(size_lock);
+    apr_thread_mutex_lock(size_lock);
     size_map[appnd] = longest_str + 1;
-    apr_mutex_unlock(size_lock);
+    apr_thread_mutex_unlock(size_lock);
 
     refundStr(appnd);
 
 }
 
-bool TGLBaseImpl::getStringSize(const char *ptr, size_t *res)
+bool TGLBaseImpl::getStringSize(char *ptr, size_t *res)
 {
     bool ret = false;
     assert(ptr && res);
     
-    apr_mutex_lock(size_lock);
+    apr_thread_mutex_lock(size_lock);
     map<char*,size_t>::iterator it = size_map.find(ptr);
     if(it != size_map.end()) {
         ret = true;
-        *res = it->second();
+        *res = it->second;
     }
-    apr_mutex_unlock(size_lock);
+    apr_thread_mutex_unlock(size_lock);
 
     return ret;
 }
@@ -378,7 +386,7 @@ bool TGLBaseImpl::resizeString(char **ptr, size_t str_len)
     if(!getStringSize(*ptr, &curr_sz))
         ret = false;
     else if (str_len > curr_sz - 1) {
-        apr_mutex_lock(size_lock);
+        apr_thread_mutex_lock(size_lock);
         size_map.erase(*ptr);
         
         delete *ptr;
@@ -388,7 +396,7 @@ bool TGLBaseImpl::resizeString(char **ptr, size_t str_len)
 
         size_map[*ptr] = str_len + 1;
 
-        apr_mutex_unlock(size_lock);
+        apr_thread_mutex_unlock(size_lock);
     }
     return ret;
 }
@@ -398,22 +406,22 @@ void TGLBaseImpl::putErr(apr_status_t rv)
     apr_strerror(rv, errBuf, errBufSz);
     char *errStr = NULL;
     
-    apr_mutex_lock(spare_lock);
+    apr_thread_mutex_lock(spare_lock);
     if(!spare_queue.empty()) {
         errStr = spare_queue.back();
-        spare_queue().pop();
+        spare_queue.pop();
     }
     else {
         errStr = new char [errBufSz];
-        apr_mutex_lock(size_lock);
+        apr_thread_mutex_lock(size_lock);
         size_map[errStr] = errBufSz;
-        apr_mutex_unlock(size_lock);
+        apr_thread_mutex_unlock(size_lock);
     }
-    apr_mutex_unlock(spare_lock);
+    apr_thread_mutex_unlock(spare_lock);
 
-    apr_mutex_lock(err_lock);
+    apr_thread_mutex_lock(err_lock);
     errStack.push(errStr);
-    apr_mutex_unlock(err_lock);
+    apr_thread_mutex_unlock(err_lock);
 }
 
 bool TGLBaseImpl::createThreads()
@@ -428,13 +436,12 @@ bool TGLBaseImpl::createSpecificThread(apr_thread_t **worker, apr_thread_start_t
     apr_status_t rv = APR_SUCCESS;
     
     rv = apr_threadattr_create(&attr, pool);
-    TGL_APR_ASSERT(rv);
 
     rv = apr_threadattr_detach_set(attr, 1);
-    TGL_APR_ASSERT(rv);
+    assert(rv == APR_SUCCESS);
 
     rv = apr_thread_create(worker, attr, (apr_thread_start_t)thread_func, this, pool);
-    TGL_APR_ASSERT(rv);
+    assert(rv == APR_SUCCESS);
 
 end:
     return true;
