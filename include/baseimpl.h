@@ -9,6 +9,8 @@
 using namespace std;
 
 void *thread_func(apr_thread_t *thread, void *param);
+void *recv_thread_func(apr_thread_t *thread, void *param);
+void *send_thread_func(apr_thread_t *thread, void *param);
 
 class TGLBaseImpl
 {
@@ -36,7 +38,8 @@ public:
     virtual const char *getLastError();
 protected:
     apr_pool_t *pool;
-    apt_thread_t *worker;
+    apt_thread_t *receiver;
+    apt_thread_t *sender;
     apr_socket_t *socket;
     
     apr_mutex_t *send_lock;
@@ -74,6 +77,8 @@ protected:
     bool getStringSize(const char *ptr, size_t *res);
     bool resizeString(char **ptr, size_t str_len);
     void putErr(apr_status_t rv);
-    bool createThread();
+    bool createThreads();
+private:
+    bool createSpecificThread(apr_thread_t **worker, apr_thread_start_t func);
 };
 #endif
