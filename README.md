@@ -27,7 +27,7 @@ TGLServerPort
 Notes
 ==
 
-_timeoutMillis_ parameter supports the following values:
+_timeoutMillis_ parameter can have the following values:
  - -1 - block forever
  - 0 - non-blocking mode, not supported in _connect()_
  - any positive value - block for at most _timeoutMillis_
