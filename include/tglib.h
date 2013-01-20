@@ -1,43 +1,18 @@
 #ifndef _TGLIB_H
 #define _TGLIB_H
+
+#include <stddef.h>
+
 class TGLSImpl;
 class TGLCImpl;
 
 void TGLib_start();
 void TGLib_end();
 
-/** 
- * Server port class.
- */
-
-
-class TGLServerPort
-{
-public:
-    TGLibServerPort();
-    TGLibServerPort(const char *host, int port);
-    ~TGLibServerPort();
-
-    /**
-     * Start listening to connections on a specified port.
-     * @return true on successful start and false on failure
-     */
-    bool bind();
-    bool bind(const char *port, int host);
-
-    bool accept(TGLPort *port, int timeoutMs);
-
-    int getLastError();
-
-    void close();
-private:
-    TGLSImpl *pimpl;
-};
-
 class TGLPort
 {
 public:
-    TGLPort(const char *host = NULL, int port);
+    TGLPort(const char *host = NULL, int port = 0);
     TGLPort();
     ~TGLPort();
 
@@ -67,7 +42,35 @@ public:
     void close();
 
     int getLastError();
-private:
+public:
     TGLCImpl *pimpl;
+};
+
+/** 
+ * Server port class.
+ */
+
+
+class TGLServerPort
+{
+public:
+    TGLServerPort();
+    TGLServerPort(const char *host, int port);
+    ~TGLServerPort();
+
+    /**
+     * Start listening to connections on a specified port.
+     * @return true on successful start and false on failure
+     */
+    bool bind();
+    bool bind(const char *port, int host);
+
+    bool accept(TGLPort *port, int timeoutMs);
+
+    int getLastError();
+
+    void close();
+private:
+    TGLSImpl *pimpl;
 };
 #endif

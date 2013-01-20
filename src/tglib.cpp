@@ -6,11 +6,15 @@
 #include <apr_poll.h>
 #include <apr_network_io.h>
 
+
+#define TGLB_APR_ASSERT(rv)\
+    assert(rv == APR_SUCCESS)
 class BaseImpl
 {
 public:
     BaseImpl()
     {
+        blocking = true;
         host = NULL;
         port = 0;
         createPool();
@@ -18,6 +22,7 @@ public:
 
     BaseImpl(const char *host, int port)
     {
+        blocking = true;
         this->port = port;
         copyHost(host);
         createPool();
@@ -28,12 +33,7 @@ public:
         if(host)
             free(host);
 
-        apr_status_t rv = apr_pool_destroy(pool);
-        /*
-         * The following assert is commented out because not so many
-         * people give a damn about this error in destructor
-         */
-        //TGLS_APR_ASSERT(rv);
+        apr_pool_destroy(pool);
     }
     
     int getLastError()
@@ -57,7 +57,7 @@ public:
             this->port = port;
     }
 
-    void setBlocking(bool blocking, apr_socket_t *s)
+    void setSockBlocking(bool blocking, apr_socket_t *s)
     {
         if(this->blocking != blocking) {
             apr_socket_opt_set(s, APR_SO_NONBLOCK, (int)blocking);
@@ -78,8 +78,8 @@ protected:
     
     void createPool()
     {
-        apr_status_t rv = apr_pool_create(pool, NULL); //root pool
-        TGLS_APR_ASSERT(rv);
+        apr_status_t rv = apr_pool_create(&pool, NULL); //root pool
+        TGLB_APR_ASSERT(rv);
     }
 
     void copyHost(const char *host)
@@ -88,11 +88,11 @@ protected:
         if(this->host) {
             size_t currLen = strlen(this->host);
             if (currLen < len) {
-                this->host = realloc( (len+1) * sizeof(char));
+                this->host =(char*) realloc((void*)this->host, (len+1) * sizeof(char));
             }
         }
         else
-            this->host = calloc(len + 1, sizeof(char));
+            this->host =(char*) calloc(len + 1, sizeof(char));
         assert(this->host);
         strcpy(this->host, host);
     }
@@ -104,10 +104,10 @@ protected:
         apr_sockaddr_t *sa;
         
         rv = apr_sockaddr_info_get(&sa, host, APR_INET, port, 0, pool);
-        TGLS_APR_ASSERT(rv);
+        TGLB_APR_ASSERT(rv);
         
-        rv = apr_socket_create(&s, sa->family, SOCK_STREAM, APR_PROTO_TCP, pool);
-        TGLS_APR_ASSERT(rv);
+        rv = apr_socket_create(s, sa->family, SOCK_STREAM, APR_PROTO_TCP, pool);
+        TGLB_APR_ASSERT(rv);
 
         return sa;
     }
@@ -127,9 +127,9 @@ protected:
     bool bindSocket(apr_socket_t *s, apr_sockaddr_t *addr)
     {
         bool ret = true;
-        apt_status_t rv;
+        apr_status_t rv;
 
-        rv = apr_socket_bind(s, sa);
+        rv = apr_socket_bind(s, addr);
         if (rv != APR_SUCCESS) {
             ret = false;
             err = rv;
@@ -146,45 +146,48 @@ protected:
 //!!!CLIENT AND ACCEPTED PORT!!!
 
 //private implementation
-class TGLSimpl;
-class TGLCimpl : public BaseImpl
+class TGLCImpl : public BaseImpl
 {
 public:
-    TGLCimpl() : BaseImpl()
+    void setBlocking(bool blocking)
+    {
+        setSockBlocking(blocking, sock);
+    }
+
+    TGLCImpl() : BaseImpl()
     {
         blocking = true;
-        socket = NULL;
+        sock = NULL;
     };
     
-    TGLCimpl(const char *host, int port)
+    TGLCImpl(const char *host, int port)
     {
         blocking = true;
-        socket = NULL;
+        sock = NULL;
     };
 
     //5 extra lines of code...
-    ~TGLCimpl()
+    ~TGLCImpl()
     {
-        if(socket)
-            apr_socket_close(socket);
+        close();
     }
 
     bool connect(const char *host, int port, int timeoutMs)
     {
-        setup();
+        setup(host, port);
         bool ret = true;
-        apr_sockaddr_t *sa= createSocket(&socket);
+        apr_sockaddr_t *sa= createSocket(&sock);
         
         //blocking mode
-        apr_socket_opt_set(socket, APR_SO_NONBLOCK, 0);
+        apr_socket_opt_set(sock, APR_SO_NONBLOCK, 0);
 
         //default timeout is 1 second
         if(timeoutMs == 0)
             timeoutMs = 1000;
 
-        apr_socket_timeout_set(socket, timeoutMs);
+        apr_socket_timeout_set(sock, timeoutMs);
 
-        apr_status_t rv = apr_socket_connect(socket, sa);
+        apr_status_t rv = apr_socket_connect(sock, sa);
         if(rv != APR_SUCCESS) {
             ret = false;
             err = rv;
@@ -195,12 +198,12 @@ public:
     void configureTimeout(int timeoutMs)
     {
         if(timeoutMs != 0) { //blocking mode
-            setBlocking(true);
+            setSockBlocking(true, sock);
         }
         else {
-            setBlocking(false);
+            setSockBlocking(false, sock);
         }
-        setTimeout(timeoutMs);
+        setTimeout(timeoutMs, sock);
     }
 
     bool send(const char *data, size_t *len, int timeoutMs)
@@ -212,9 +215,9 @@ public:
         size_t sent = 0, rem = *len;
 
         apr_status_t rv;
-        while(sent < len) {
+        while(sent < *len) {
             rem = *len - sent;
-            rv = apr_socket_send(socket, data + sent, &rem);
+            rv = apr_socket_send(sock, data + sent, &rem);
             if(rv != APR_SUCCESS) {
                 err = rv;
                 ret = false;
@@ -236,9 +239,9 @@ public:
         size_t received = 0, rem = *len;
 
         apr_status_t rv;
-        while(received < len) {
+        while(received < *len) {
             rem = *len - received;
-            rv = apr_socket_recv(socket, data + received, &rem);
+            rv = apr_socket_recv(sock, data + received, &rem);
             if(rv != APR_SUCCESS) {
                 err = rv;
                 ret = false;
@@ -252,20 +255,28 @@ public:
         return ret;
     }
 
+    void close()
+    {
+        if(sock)
+            apr_socket_close(sock);
+    }
+
 private:
-    friend class TGLSimpl;
+    friend class TGLSImpl;
+    friend class TGLServerPort;
+    apr_socket_t *sock;
 };
 
 //implemetation
 
 TGLPort::TGLPort()
 {
-    pimpl = new TGLCimpl();
+    pimpl = new TGLCImpl();
 }
 
 TGLPort::TGLPort(const char *host, int port)
 {
-    pimpl = new TGLCimpl(host, port);
+    pimpl = new TGLCImpl(host, port);
 }
 
 TGLPort::~TGLPort()
@@ -291,12 +302,12 @@ bool TGLPort::connect(int timeoutMs)
     return connect(NULL, 0, timeoutMs);
 }
 
-bool TGLPort::send(const char *data, size_t len, int timeoutMs)
+bool TGLPort::send(const char *data, size_t *len, int timeoutMs)
 {
     return pimpl->send(data, len, timeoutMs);
 }
 
-bool TGLPort::recv(char *data, size_t len, int timeoutMs)
+bool TGLPort::recv(char *data, size_t *len, int timeoutMs)
 {
     return pimpl->recv(data, len, timeoutMs);
 }
@@ -313,25 +324,27 @@ int TGLPort::getLastError()
 
 //!!!SERVER PORT!!!
 
-#define TGLS_APR_ASSERT(rv)\
-    assert(rv == APR_SUCCESS)
 //private implementation
-class TGLSimpl : public BaseImpl
+class TGLSImpl : public BaseImpl
 {
 public:
-    TGLSimpl() : BaseImpl()
+    void setBlocking(bool blocking)
+    {
+        setSockBlocking(blocking, backlog);
+    }
+    TGLSImpl() : BaseImpl()
     {
         blocking = true;;
         backlog = NULL;
     }
 
-    TGLSimpl(const char *host, int port) : BaseImpl(host, port);
+    TGLSImpl(const char *host, int port) : BaseImpl(host, port)
     {
         blocking = true;
         backlog = NULL;
     }
     
-    ~TGLSimpl()
+    ~TGLSImpl()
     {
         if (backlog)
             apr_socket_close(backlog);
@@ -352,16 +365,16 @@ public:
 
     bool accept(TGLPort *port, int timeout = 0)
     {
-        assert(!port->pimpl->socket);
+        assert(!port->pimpl->sock);
         assert(port->pimpl->pool);
 
         bool ret = true;
         if(timeout) {
             apr_socket_timeout_set(backlog, timeout);
         }
-        apr_status_t rv = apr_socket_accept(&port->socket, 
+        apr_status_t rv = apr_socket_accept(&port->pimpl->sock, 
                                             backlog,
-                                            port->pool);
+                                            port->pimpl->pool);
         if (rv != APR_SUCCESS) {
             ret = false;
             err = rv;
@@ -377,19 +390,19 @@ public:
         backlog = NULL;
     }
 private:
-    bool blocking;
+    apr_socket_t *backlog;
 };
 
 //implementation
 
 TGLServerPort::TGLServerPort()
 {
-    pimpl = new TGLSimpl();
+    pimpl = new TGLSImpl();
 }
 
-TGLServerPort::TGlServerPort(const char *host, int port)
+TGLServerPort::TGLServerPort(const char *host, int port)
 {
-    pimpl = new TGLSimpl(host, port);
+    pimpl = new TGLSImpl(host, port);
 }
 
 TGLServerPort::~TGLServerPort()
@@ -402,7 +415,7 @@ bool TGLServerPort::bind()
     return pimpl->bind();
 }
 
-bool TGLServerPort::bind(const char *port, int host)
+bool TGLServerPort::bind(const char *host, int port)
 {
     assert(port);
     assert(host);
