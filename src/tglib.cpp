@@ -56,11 +56,25 @@ public:
         else
             this->port = port;
     }
+
+    void setBlocking(bool blocking, apr_socket_t *s)
+    {
+        if(this->blocking != blocking) {
+            apr_socket_opt_set(s, APR_SO_NONBLOCK, (int)blocking);
+            this->blocking = blocking;
+        }
+    }
+
+    bool isBlocking()
+    {
+        return blocking;
+    }
 protected:
     char *host;
     int port;
     apr_status_t err;
     apr_pool_t *pool;
+    bool blocking;
     
     void createPool()
     {
@@ -122,6 +136,11 @@ protected:
         }
         return ret;
     }
+
+    void setTimeout(int ms, apr_socket_t *s)
+    {
+        apr_socket_timeout_set(s, ms);
+    }
 };
 
 //!!!CLIENT AND ACCEPTED PORT!!!
@@ -173,9 +192,64 @@ public:
         return ret;
     }
 
-    bool send(const char *data, size_t len)
+    void configureTimeout(int timeoutMs)
     {
+        if(timeoutMs != 0) { //blocking mode
+            setBlocking(true);
+        }
+        else {
+            setBlocking(false);
+        }
+        setTimeout(timeoutMs);
+    }
 
+    bool send(const char *data, size_t *len, int timeoutMs)
+    {
+        bool ret = true;
+
+        configureTimeout(timeoutMs);
+
+        size_t sent = 0, rem = *len;
+
+        apr_status_t rv;
+        while(sent < len) {
+            rem = *len - sent;
+            rv = apr_socket_send(socket, data + sent, &rem);
+            if(rv != APR_SUCCESS) {
+                err = rv;
+                ret = false;
+                break;
+            }
+            sent += rem;
+        }
+
+        *len = sent;
+        return ret;
+    }
+
+    bool recv(char *data, size_t *len, int timeoutMs)
+    {
+        bool ret = true;
+
+        configureTimeout(timeoutMs);
+
+        size_t received = 0, rem = *len;
+
+        apr_status_t rv;
+        while(received < len) {
+            rem = *len - received;
+            rv = apr_socket_recv(socket, data + received, &rem);
+            if(rv != APR_SUCCESS) {
+                err = rv;
+                ret = false;
+                break;
+            }
+            received += rem;
+        }
+
+        *len = received;
+
+        return ret;
     }
 
 private:
@@ -217,9 +291,9 @@ bool TGLPort::connect(int timeoutMs)
     return connect(NULL, 0, timeoutMs);
 }
 
-bool TGLPort::send(const char *data, size_t len)
+bool TGLPort::send(const char *data, size_t len, int timeoutMs)
 {
-    return pimpl->send(data, len);
+    return pimpl->send(data, len, timeoutMs);
 }
 
 bool TGLPort::recv(char *data, size_t len, int timeoutMs)

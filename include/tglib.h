@@ -62,8 +62,8 @@ public:
     //virtual bool isBlocking();
     //virtual void setBLocking(bool blocking);
 
-    bool send(const char *data, size_t len);
-    bool recv(char *data, size_t len, int timeoutMs = 0);
+    bool send(const char *data, size_t *len, int timeoutMs);
+    bool recv(char *data, size_t *len, int timeoutMs = 0);
     void close();
 
     int getLastError();
