@@ -1,8 +1,8 @@
 tglib
 ==
-
 Tupoy Gruzchick (Dumb Porter) library. Helps children study network programming in C++.
 At the moment, limited to IPv4 and single client-server connection
+
 
 
 Interface Specificaton
@@ -13,9 +13,10 @@ TGLPort
 
  - bool connect(char* host, int port, int timeoutMillis);
  - void send(char* data, int n);
- - int receive(char* data, int bufferSize, int timeoutMillis);
+ - int receive(char* data, int bufferSize);
  - void sendMess(char* data, int n);
- - int receiveMess(char* data, int bufferSize, bool* fullMessageReceived, int timeoutMillis);
+ - int receiveMess(char* data, int bufferSize, int* bytesLeft);
+ - void setReceiveTimeout(int timeoutMillis);
  - void close();
  - int getLastErrorCode();
 
