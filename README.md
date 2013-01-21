@@ -14,6 +14,8 @@ TGLPort
  - bool connect(char* host, int port, int timeoutMillis);
  - void send(char* data, int n);
  - int receive(char* data, int bufferSize, int timeoutMillis);
+ - void sendMess(char* data, int n);
+ - int receiveMess(char* data, int bufferSize, bool* fullMessageReceived, int timeoutMillis);
  - void close();
  - int getLastErrorCode();
 
