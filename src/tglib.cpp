@@ -60,10 +60,9 @@ public:
 
     void setSockBlocking(bool blocking, apr_socket_t *s)
     {
-        if(this->blocking != blocking) {
-            apr_socket_opt_set(s, APR_SO_NONBLOCK, (int)blocking);
-            this->blocking = blocking;
-        }
+
+        apr_socket_opt_set(s, APR_SO_NONBLOCK, (int)(!blocking));
+        this->blocking = blocking;
     }
 
     bool isBlocking()
@@ -405,7 +404,6 @@ bool TGLPort::connect(char *host, int port, int timeoutMs)
 
     bool ret = true;
 
-    pimpl->setBlocking(true);
     ret = pimpl->connect(host, port, timeoutMs);
 
     return ret;
@@ -486,8 +484,12 @@ public:
         bool ret = true;
         
         apr_sockaddr_t *addr = createSocket(&backlog);
+
         setSockOpts(backlog);
         ret = bindSocket(backlog, addr);
+
+        apr_status_t rv = apr_socket_listen(backlog, SOMAXCONN);
+        TGLB_APR_ASSERT(rv);
 
         return ret;
     }
@@ -507,6 +509,9 @@ public:
         if (rv != APR_SUCCESS) {
             ret = false;
             err = rv;
+            char buf[80];
+            char *ret = apr_strerror(rv, buf, 80);
+            printf("accept fucked up: %s\n", buf);
         }
         return ret;
     }
