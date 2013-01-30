@@ -12,7 +12,7 @@ void TGLib_end();
 class TGLPort
 {
 public:
-    TGLPort(const char *host = NULL, int port = 0);
+    TGLPort(const char *host, int port);
     TGLPort();
     ~TGLPort();
 

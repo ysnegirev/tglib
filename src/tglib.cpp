@@ -584,3 +584,12 @@ void TGLServerPort::close()
     pimpl->close();
 }
 
+void TGLib_start()
+{
+    apr_initialize();
+}
+
+void TGLib_end()
+{
+    apr_terminate();
+}
