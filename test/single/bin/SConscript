@@ -1,0 +1,10 @@
+Import('env')
+
+tenv = env.Clone()
+tenv.Append(LIBPATH='#lib')
+tenv.Append(LIBS=['tglib'])
+
+client = tenv.Program(target = 'client', source = 'client.cpp')
+server = tenv.Program(target = 'server', source = 'server.cpp')
+
+Return(['client', 'server'])

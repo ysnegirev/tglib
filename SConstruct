@@ -11,6 +11,9 @@ if 'linux' in sys.platform:
 elif 'darwin' in sys.platform:
     env.Append(CPPPATH='/opt/local/include/apr-1')
 
+Export('env')
+
+
 
 objs = []
 for s in src:
@@ -18,3 +21,6 @@ for s in src:
     objs.append(o)
 
 env.SharedLibrary(target='#lib/tglib', source = objs)
+#f = env.SConscript('#tests/single/SConscript', build_dir = '#tests/single/SConscript')
+#f = env.SConscript('#test/single/SConscript', variant_dir = 'test/single')
+f = env.SConscript('#test/single/SConscript')
