@@ -14,8 +14,9 @@ int main(int argc, char **argv)
     TGLServerPort sp("0.0.0.0", 1234);
     TGLPort client;
     assert(sp.bind());
-    printf("waiting for incoming connection");
+    printf("waiting for incoming connection\n");
     assert(sp.accept(&client, -1));
+    printf("someone connected\n");
 
     char buf[100];
     size_t left = 0;
