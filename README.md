@@ -5,7 +5,7 @@ At the moment, limited to IPv4 and single client-server connection
 
 
 
-Interface Specificaton
+Interface Specificaton:
 ==
 
 TGLPort
