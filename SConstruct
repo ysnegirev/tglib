@@ -20,7 +20,7 @@ for s in src:
     o = env.SharedObject(s)
     objs.append(o)
 
-env.SharedLibrary(target='#lib/tglib', source = objs)
+env.StaticLibrary(target='#lib/tglib', source = objs)
 #f = env.SConscript('#tests/single/SConscript', build_dir = '#tests/single/SConscript')
 #f = env.SConscript('#test/single/SConscript', variant_dir = 'test/single')
 f = env.SConscript('#test/single/SConscript')
