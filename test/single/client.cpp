@@ -13,7 +13,7 @@ int main(int argc, char **argv)
     
     TGLPort client;
 
-    assert(client.connect("127.0.0.1", 1234, 10));
+    assert(client.connect("10.7.3.127", 1234, -1));
     printf("connected\n");
 
     char buf[100];
