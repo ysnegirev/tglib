@@ -5,7 +5,7 @@ src = Glob('#src/*.cpp')
 env.Append(CPPPATH=['#include'])
 env.Append(CFLAGS=['-O0', '-g'])
 env.Append(CXXFLAGS=['-O0', '-g'])
-env.Append(LIBS='apr-1')
+#env.Append(LIBS='apr-1')
 env.Append(CPPDEFINES='OS_UNIX')
 if 'linux' in sys.platform:
     env.Append(CPPPATH=['/usr/include/apr-1.0'])

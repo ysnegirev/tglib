@@ -4,10 +4,6 @@
 #include <cstring>
 #include <cstdio>
 
-//#include <apr_poll.h>
-//#include <apr_network_io.h>
-
-
 #ifdef OS_UNIX
 #   include <arpa/inet.h>
 #   include <netinet/in.h>
@@ -36,7 +32,8 @@ public:
         port = 0;
         //createPool();
         isAddrSet = false;
-        createAddr();
+        //createAddr(false);
+        memset(&addr, 0, sizeof(addr));
     }
 
     BaseImpl(const char *host, int port)
@@ -45,7 +42,8 @@ public:
         this->port = port;
         copyHost(host);
         //createPool();
-        createAddr();
+        //createAddr(false);
+        memset(&addr, 0, sizeof(addr));
     }
     
     ~BaseImpl()
@@ -128,12 +126,20 @@ protected:
         strcpy(this->host, host);
     }
 
-    void createAddr()
+    void createAddr(bool serverPort)
     {
         if(host && !isAddrSet) {
             struct addrinfo hints, *res;
             memset(&hints, 0, sizeof(hints));
             hints.ai_family=AF_INET;
+            hints.ai_socktype = SOCK_STREAM;
+            if(serverPort) {
+                printf("getting server port address\n");
+                hints.ai_flags |= AI_PASSIVE;
+            }
+            else {
+                printf("SUDDENLY, getting client port address\n");
+            }
 
             char *port_str = NULL;
             char *host_to_pass = strdup(host);
@@ -158,9 +164,8 @@ protected:
             if(!found)
                 delete [] port_str;
             free(host_to_pass);
-            abort();
-            addr = *res[0].ai_addr;
-            //memcpy((void*)&addr, (void*)&res[0].ai_addr, sizeof(res[0].ai_addr));
+            //addr = *res->ai_addr;
+            memcpy((void*)&addr, (void*)res->ai_addr, sizeof(struct sockaddr));
             isAddrSet = true;
             freeaddrinfo(res);
         }
@@ -288,7 +293,7 @@ public:
         
         if(timeoutMs != 0 ) {
             sock = createSocket();
-            createAddr();
+            createAddr(false);
             if (timeoutMs < 0) { //block forever
                 setBlocking(true);
                 configureTimeout(-1);
@@ -481,7 +486,7 @@ public:
                 }
             }
 
-            int retries = 10;
+            int retries = 0;
             while(bytesRead < len && retries++ < 10) {
                 rem = len - bytesRead;
                 if(!receive(recv_buf, &rem, 0)) {
@@ -655,12 +660,47 @@ public:
         bool ret = true;
         
         backlog = createSocket();
-        createAddr();
+        createAddr(true);
 
         setSockOpts(backlog);
-        struct sockaddr_in *inaddr = NULL;
-        inaddr = (sockaddr_in*)&addr;
-        printf("port: %d\n", inaddr->sin_port);
+        char currHost[10], currPort[10];
+        int nameinfoRet = getnameinfo(&addr, sizeof(addr),
+                    currHost, sizeof(currHost),
+                    currPort, sizeof(currPort),
+                    0);
+        if(nameinfoRet != 0) {
+            switch(nameinfoRet) {
+                case EAI_AGAIN:
+                    printf("should try again later\n");
+                    break;
+                case EAI_BADFLAGS:
+                    printf("flags are shitty\n");
+                    break;
+                case EAI_FAIL:
+                    printf("epic fail\n");
+                    break;
+                case EAI_FAMILY:
+                    printf("bad addres family\n");
+                    break;
+                case EAI_MEMORY:
+                    printf("out of memory\n");
+                    break;
+                case EAI_NONAME:
+                    printf("name cannot be resolved\n");
+                    break;
+                case EAI_OVERFLOW:
+                    printf("too small buffers\n");
+                    break;
+                case EAI_SYSTEM:
+                    printf("bad shit happened...\n");
+                    perror("getnameinfo");
+                    break;
+            }
+        }
+        else {
+            printf("got host: %s, port: %s\n", currHost, currPort);
+        }
+        
         ret = bindSocket(backlog);
         if (ret) {
             //apr_status_t rv = apr_socket_listen(backlog, SOMAXCONN);

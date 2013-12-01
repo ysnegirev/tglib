@@ -9,7 +9,7 @@ using namespace std;
 
 int main(int argc, char **argv)
 {
-    TGLib_start();
+    //TGLib_start();
     
     TGLServerPort sp("0.0.0.0", 1234);
     TGLPort client;
@@ -19,6 +19,7 @@ int main(int argc, char **argv)
     printf("someone connected\n");
 
     char buf[100];
+    memset(buf, 0, sizeof(buf));
     size_t left = 0;
     client.setMessRecvTimeout(-1);
 
@@ -28,6 +29,6 @@ int main(int argc, char **argv)
     assert(client.sendMess("medved", strlen("medved") +1, -1));
     printf("sent medved\n");
     
-    TGLib_end();
+    //TGLib_end();
     return 0;
 }
