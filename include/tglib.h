@@ -22,7 +22,7 @@ public:
     //void setPort(int port);
     //int getPort();
 
-    
+
 //_timeoutMillis_ parameter can have the following values:
 // - -1 - block forever
 // - 0 - non-blocking mode, not supported in _connect()_
@@ -51,10 +51,10 @@ public:
 
     /**
      * Receive data, sent via primitive message-driven interface.
-     * @return >0 when all data has been received. Returned value is received 
+     * @return >0 when all data has been received. Returned value is received
      * data length
      * -2 if error occured while reading message length. left is undefined
-     * -1 if error occured while reading message body. left is message bytes, 
+     * -1 if error occured while reading message body. left is message bytes,
      *  that haven't been written into a buffer
      * == 0 if the size of the buffer supplied is less, than buffer size supplied
      */
@@ -67,7 +67,7 @@ public:
     TGLCImpl *pimpl;
 };
 
-/** 
+/**
  * Server port class.
  */
 
@@ -112,7 +112,18 @@ private:
 #   include <unistd.h>
     typedef  int SOCKET;
 #   define INVALID_SOCKET -1
+int WSAGetLastError(void)
+{
+    return errno;
+}
+#   define EINPROGRESS WSAEINPROGRESS
+#   define EWOULDBLOCK WSAEWOULDBLOCK
+#   define close closesocket
 #else
+#   define WINVER 0x0510 //I hope noone will use library on windows under 2000...
+#   include <winsock2.h>
+#   include <Ws2tcpip.h>
+#   include <stdint.h>
 #endif
 
 class BaseImpl
@@ -134,13 +145,13 @@ public:
         copyHost(host);
         memset(&addr, 0, sizeof(addr));
     }
-    
+
     ~BaseImpl()
     {
         if(host)
             free(host);
     }
-    
+
     int getLastError()
     {
         int ret = err;
@@ -255,7 +266,7 @@ protected:
         setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const void*)&optval, optlen);
 #endif
     }
-    
+
     bool bindSocket(SOCKET s)
     {
         bool ret = true;
@@ -304,7 +315,11 @@ static inline bool checkConnectionErr(SOCKET s)
 {
     int sockerr = 0;
     socklen_t optlen = 0;
+#ifdef OS_UNIX
     getsockopt(s, SOL_SOCKET, SO_ERROR, &sockerr, &optlen);
+#else
+    getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&sockerr, &optlen);
+#endif // OS_UNIX
     if(sockerr != 0) {
         fprintf(stderr, "Connection error: %s\n", strerror(sockerr));
     }
@@ -324,14 +339,14 @@ public:
     {
         blocking = true;
         sock = INVALID_SOCKET;
-        
+
         msgBuf.capacity = 100;
         msgBuf.filled = 0;
         msgBuf.pos = 0;
         msgBuf.buf = (char*)calloc(msgBuf.capacity, sizeof(char));
         assert(msgBuf.buf);
     };
-    
+
     TGLCImpl(const char *host, int port) : BaseImpl(host, port)
     {
         blocking = true;
@@ -348,7 +363,7 @@ public:
     {
         setup(host, port);
         bool ret = true;
-        
+
         if(timeoutMs != 0 ) {
             sock = createSocket();
             createAddr(false);
@@ -376,7 +391,7 @@ public:
              */
             setBlocking(false);
             int res = ::connect(sock, &addr, sizeof(struct sockaddr));
-            if(res != 0 && errno == EINPROGRESS) { 
+            if(res != 0 && WSAGetLastError() == WSAEWOULDBLOCK) {
                 fd_set  wr;
                 FD_ZERO(&wr);
                 struct timeval timeout;
@@ -435,13 +450,18 @@ public:
 
         while(sent < *len) {
             rem = *len - sent;
+#           ifdef OS_UNIX
             res = ::send(sock, (void*)(data + sent), rem, 0);
+#           else
+            res = ::send(sock, data + sent, rem, 0);
+#           endif
             if(res < 0) {
-                if (  !isBlocking() && 
-                      (errno == EAGAIN || errno == EWOULDBLOCK)
+                if (  !isBlocking() &&
+
+                      (WSAGetLastError() == WSAEWOULDBLOCK)
                 )
                     continue;
-                
+
                 ret = false;
                 break;
             }
@@ -465,13 +485,17 @@ public:
 
         while(received < *len) {
             rem = *len - received;
+#           ifdef OS_UNIX
             res = recv(sock, (void*)(data + received), rem, 0);
+#           else
+            res = recv(sock, data + received, rem, 0);
+#           endif // OS_UNIX
             if(res < 0) {
-                if (  !isBlocking() && 
-                      (errno == EAGAIN || errno == EWOULDBLOCK)
+                if (  !isBlocking() &&
+                      (WSAGetLastError() == WSAEWOULDBLOCK)
                 )
                     continue;
-                
+
                 ret = false;
                 break;
             }
@@ -488,7 +512,7 @@ public:
     void close()
     {
         if(sock != INVALID_SOCKET)
-            ::close(sock);
+            ::closesocket(sock);
     }
 
     bool sendMess(const char *buf, size_t bufSz, int timeoutMs)
@@ -526,7 +550,7 @@ public:
             len = ntohl(len);
 
             //now we must read len bytes
-            
+
             //prepairing receive buffer
             char *recv_buf = NULL;
             size_t rem = len;
@@ -577,7 +601,7 @@ private:
         size_t filled;
         size_t pos;
     } msgBuf;
-    
+
     signed long copyReadBytes(char *buf, size_t bufSz, size_t *bytesLeft)
     {
         signed long ret = 0;
@@ -699,11 +723,11 @@ public:
         blocking = true;
         backlog = INVALID_SOCKET;
     }
-    
+
     ~TGLSImpl()
     {
         if (backlog != INVALID_SOCKET)
-            ::close(backlog);
+            ::closesocket(backlog);
     }
 
     bool bind(const char *host = NULL, int port = 0)
@@ -711,7 +735,7 @@ public:
         setup(host, port);
 
         bool ret = true;
-        
+
         backlog = createSocket();
         createAddr(true);
 
@@ -732,7 +756,7 @@ public:
 
         return attemptAccept(port, timeoutMs);
     }
-    
+
     bool attemptAccept(TGLPort *port, int timeoutMs)
     {
         bool ret = true;
@@ -764,7 +788,7 @@ public:
     void close()
     {
         if(backlog != INVALID_SOCKET)
-            ::close(backlog);
+            ::closesocket(backlog);
         backlog = INVALID_SOCKET;
     }
 private:
@@ -804,7 +828,7 @@ bool TGLServerPort::accept(TGLPort *port, int timeoutMs)
 {
     assert(port);
     bool ret = true;
-    
+
     if (timeoutMs == 0) { //nonblocking mode
         ret = pimpl->accept(port);
     }
