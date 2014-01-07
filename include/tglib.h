@@ -240,7 +240,7 @@ protected:
             int ret = 0;
             if ( (ret = getaddrinfo(host_to_pass, port_str, &hints, &res)) != 0) {
                res = NULL;
-#              ifdef OS_UNIX
+#              if defined(OS_UNIX) || not defined(_MSC_VER)
                printf(gai_strerror(ret));
 #              else
                wprintf(gai_strerror(ret));
