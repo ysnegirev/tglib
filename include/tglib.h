@@ -117,9 +117,9 @@ int WSAGetLastError(void)
 {
     return errno;
 }
-#   define EINPROGRESS WSAEINPROGRESS
-#   define EWOULDBLOCK WSAEWOULDBLOCK
-#   define close closesocket
+#   define WSAEINPROGRESS EINPROGRESS
+#   define  WSAEWOULDBLOCK EWOULDBLOCK
+#   define closesocket close
 #else
 #   define WINVER 0x0510 //I hope noone will use library on windows under 2000...
 #   include <winsock2.h>
@@ -871,13 +871,18 @@ void TGLServerPort::close()
 
 void TGLib_start()
 {
+#ifndef OS_UNIX
     WORD ver = MAKEWORD(1,1);
     WSADATA data;
 	WSAStartup(ver, &data);
+#endif
 }
 
 void TGLib_end()
 {
+
+#ifndef OS_UNIX
     WSACleanup();
+#endif
 }
 #endif
