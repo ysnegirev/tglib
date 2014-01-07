@@ -141,9 +141,11 @@ public:
 
     BaseImpl(const char *host, int port)
     {
+        this->host = NULL;
         blocking = true;
         this->port = port;
         copyHost(host);
+        isAddrSet = false;
         memset(&addr, 0, sizeof(addr));
     }
 
@@ -186,7 +188,8 @@ public:
         }
 #else
         unsigned long val = blocking ? 0 : 1;
-        assert(ioctlsocket(s, FIONBIO, &val) == 0);
+        int ret = ioctlsocket(s, FIONBIO, &val);
+        assert(ret == 0);
 #endif
     }
 
@@ -284,7 +287,7 @@ protected:
         int rv = ::bind(s, &addr, sizeof(addr));
         if (rv != 0) {
             ret = false;
-            err = errno;
+            err = WSAGetLastError();
         }
         return ret;
     }
@@ -292,6 +295,8 @@ protected:
     void setTimeout(int ms, SOCKET s)
     {
         struct timeval timeout;
+        timeout.tv_sec = 0;
+        timeout.tv_usec = 0;
         msToTv(ms, timeout);
         //1 ms blocking timeout
         socklen_t toSize = sizeof(timeout);
