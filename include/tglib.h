@@ -112,6 +112,7 @@ private:
 #   include <unistd.h>
     typedef  int SOCKET;
 #   define INVALID_SOCKET -1
+    typedef ssize_t SSIZE_T;
 int WSAGetLastError(void)
 {
     return errno;
@@ -183,7 +184,9 @@ public:
         else {
             assert(fcntl(s, F_SETFL, cur_flags & (~O_NONBLOCK))==0);
         }
-
+#else
+        unsigned long val = blocking ? 0 : 1;
+        assert(ioctlsocket(s, FIONBIO, &val) == 0);
 #endif
     }
 
@@ -224,7 +227,7 @@ protected:
             //host does not include port. create port_str from port value
             if(!(port_str = strchr(host,':'))) {
                 port_str = new char[6];
-                assert(snprintf(port_str, 5, "%d",  port) > 0);
+                assert(sprintf(port_str, "%d",  port) > 0);
             }
             else {
                 found = true;
@@ -234,7 +237,11 @@ protected:
             int ret = 0;
             if ( (ret = getaddrinfo(host_to_pass, port_str, &hints, &res)) != 0) {
                res = NULL;
+#              ifdef OS_UNIX
                printf(gai_strerror(ret));
+#              else
+               wprintf(gai_strerror(ret));
+#              endif
             }
             if(!found)
                 delete [] port_str;
@@ -258,12 +265,15 @@ protected:
     {
         //blocking mode
         setSockBlocking(true, s);
-#ifdef OS_UNIX
         setTimeout(1, s);
         //address reusing
+#ifdef OS_UNIX
         socklen_t optlen = sizeof(int);
         int optval = 1;
         setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const void*)&optval, optlen);
+#else
+        BOOL reuseAddr = TRUE;
+        setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&reuseAddr, sizeof(BOOL));
 #endif
     }
 
@@ -281,14 +291,12 @@ protected:
 
     void setTimeout(int ms, SOCKET s)
     {
-#ifdef OS_UNIX
         struct timeval timeout;
         msToTv(ms, timeout);
         //1 ms blocking timeout
         socklen_t toSize = sizeof(timeout);
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, toSize);
         setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, toSize);
-#endif
     }
 
     inline void msToTv(int ms, struct timeval timeout)
@@ -446,7 +454,8 @@ public:
         configureTimeout(timeoutMs);
 
         size_t sent = 0, rem = *len;
-        ssize_t res;
+        SSIZE_T res;
+
 
         while(sent < *len) {
             rem = *len - sent;
@@ -481,7 +490,8 @@ public:
         configureTimeout(timeoutMs);
 
         size_t received = 0, rem = *len;
-        ssize_t res = 0;
+        SSIZE_T res;
+
 
         while(received < *len) {
             rem = *len - received;
@@ -856,9 +866,13 @@ void TGLServerPort::close()
 
 void TGLib_start()
 {
+    WORD ver = MAKEWORD(1,1);
+    WSADATA data;
+	WSAStartup(ver, &data);
 }
 
 void TGLib_end()
 {
+    WSACleanup();
 }
 #endif
