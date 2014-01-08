@@ -653,6 +653,7 @@ private:
 TGLPort::TGLPort()
 {
     pimpl = new TGLCImpl();
+    TGLib_start();
 }
 
 TGLPort::TGLPort(const char *host, int port)
@@ -815,6 +816,7 @@ private:
 TGLServerPort::TGLServerPort()
 {
     pimpl = new TGLSImpl();
+    TGLib_start();
 }
 
 TGLServerPort::TGLServerPort(const char *host, int port)
@@ -872,9 +874,13 @@ void TGLServerPort::close()
 void TGLib_start()
 {
 #ifndef OS_UNIX
-    WORD ver = MAKEWORD(1,1);
-    WSADATA data;
-	WSAStartup(ver, &data);
+    static bool inited = false;
+    if(!inited) {
+        WORD ver = MAKEWORD(1,1);
+        WSADATA data;
+        WSAStartup(ver, &data);
+        inited = true;
+    }
 #endif
 }
 
