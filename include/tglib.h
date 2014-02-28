@@ -304,7 +304,7 @@ protected:
         setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char*)&timeout, toSize);
     }
 
-    inline void msToTv(int ms, struct timeval timeout)
+    inline void msToTv(int ms, struct timeval& timeout)
     {
         int s = 0;
         if (ms > 1000) {
