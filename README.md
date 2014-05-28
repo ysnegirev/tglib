@@ -12,11 +12,12 @@ TGLPort
 
  - bool connect(char* host, int port, int timeoutMillis);
  - void send(char* data, int n);
- - int receive(char* data, int bufferSize);
+ - int recv(char* data, int bufferSize);
  - void sendMess(char* data, int n);
- - int receiveMess(char* data, int bufferSize, int* bytesLeft);
- - void setReceiveTimeout(int timeoutMillis);
+ - int recvMess(char* data, int bufferSize, int* bytesLeft);
+ - void setRecvTimeout(int timeoutMillis);
  - void close();
+ - bool isClosed();
  - int getLastErrorCode();
 
 TGLServerPort
@@ -25,6 +26,7 @@ TGLServerPort
  - bool bind(char* host, int port);
  - bool accept(TGLPort* port, int timeoutMillis);
  - void close();
+ - bool isClosed();
 
 Notes
 ==
